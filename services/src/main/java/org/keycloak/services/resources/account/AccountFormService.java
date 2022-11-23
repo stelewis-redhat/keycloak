@@ -17,6 +17,8 @@
 package org.keycloak.services.resources.account;
 
 import org.jboss.logging.Logger;
+import org.jboss.resteasy.spi.HttpRequest;
+import org.jboss.resteasy.spi.HttpResponse;
 import org.keycloak.authorization.AuthorizationProvider;
 import org.keycloak.authorization.model.PermissionTicket;
 import org.keycloak.authorization.model.Policy;
@@ -26,6 +28,7 @@ import org.keycloak.authorization.model.Scope;
 import org.keycloak.authorization.store.PermissionTicketStore;
 import org.keycloak.authorization.store.PolicyStore;
 import org.keycloak.authorization.store.ScopeStore;
+import org.keycloak.common.ClientConnection;
 import org.keycloak.common.Profile;
 import org.keycloak.common.util.Base64Url;
 import org.keycloak.common.util.Time;
@@ -71,12 +74,14 @@ import org.keycloak.services.managers.AuthenticationSessionManager;
 import org.keycloak.services.managers.UserConsentManager;
 import org.keycloak.services.messages.Messages;
 import org.keycloak.services.resources.AbstractSecuredLocalService;
+import org.keycloak.services.resources.Cors;
 import org.keycloak.services.resources.RealmsResource;
 import org.keycloak.services.util.DefaultClientSessionContext;
 import org.keycloak.services.util.ResolveRelative;
 import org.keycloak.services.validation.Validation;
 import org.keycloak.sessions.AuthenticationSessionModel;
 import org.keycloak.storage.ReadOnlyException;
+import org.keycloak.theme.Theme;
 import org.keycloak.userprofile.UserProfileContext;
 import org.keycloak.userprofile.ValidationException;
 import org.keycloak.userprofile.UserProfile;
@@ -88,12 +93,15 @@ import org.keycloak.utils.CredentialHelper;
 import javax.ws.rs.Consumes;
 import javax.ws.rs.FormParam;
 import javax.ws.rs.GET;
+import javax.ws.rs.HttpMethod;
 import javax.ws.rs.NotFoundException;
 import javax.ws.rs.POST;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
 import javax.ws.rs.QueryParam;
+import javax.ws.rs.core.Context;
+import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.MultivaluedMap;
 import javax.ws.rs.core.Response;
@@ -111,10 +119,14 @@ import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -125,6 +137,7 @@ public class AccountFormService extends AbstractSecuredLocalService {
     private static final Logger logger = Logger.getLogger(AccountFormService.class);
 
     private static Set<String> VALID_PATHS = new HashSet<>();
+    private final Pattern bundleParamPattern = Pattern.compile("(\\{\\s*(\\d+)\\s*\\})");
 
     static {
         for (Method m : AccountFormService.class.getMethods()) {
@@ -327,6 +340,80 @@ public class AccountFormService extends AbstractSecuredLocalService {
         }
         return forwardToPage("log", AccountPages.LOG);
     }
+
+
+    @GET
+    @Path("localizations/{locale}")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Object getLocalizations(@PathParam("locale") String localeStr, @Context UriInfo uriInfo, @Context HttpRequest request, @Context final HttpHeaders headers, @Context HttpResponse response, @Context ClientConnection clientConnection) {
+        Locale locale = Locale.forLanguageTag(localeStr);
+
+        Cors.add(request)
+                .allowAllOrigins()
+                .allowedMethods(HttpMethod.GET, HttpMethod.PUT, HttpMethod.POST, HttpMethod.DELETE)
+                .exposedHeaders("Location").build(response);
+
+        Theme theme;
+        try {
+            theme = this.session.theme().getTheme(Theme.Type.LOGIN);
+        } catch (IOException var12) {
+            String errorDesc = "Failed to create theme";
+            logger.error(errorDesc, var12);
+            return account.setError(Status.INTERNAL_SERVER_ERROR, "Failed to create theme").createResponse(AccountPages.ACCOUNT);
+        }
+
+        Properties messages = null;
+        try {
+            messages = theme.getMessages(locale);
+        } catch (IOException e) {
+            String errorDesc = "Unable to get messages for locale: " + locale;
+            logger.error(errorDesc, e);
+            return account.setError(Status.INTERNAL_SERVER_ERROR, errorDesc).createResponse(AccountPages.ACCOUNT);
+        }
+        RealmModel realm = session.getContext().getRealm();
+        messages.putAll(realm.getRealmLocalizationTextsByLocale(locale.toLanguageTag()));
+
+        return messagesToJsonString(messages);
+    }
+
+    private String messagesToJsonString(Properties props) {
+        if (props == null) return "";
+        Properties newProps = new Properties();
+        for (String prop: props.stringPropertyNames()) {
+            newProps.put(prop, convertPropValue(props.getProperty(prop)));
+        }
+        try {
+            return JsonSerialization.writeValueAsString(newProps);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+    private String convertPropValue(String propertyValue) {
+        // this mimics the behavior of java.text.MessageFormat used for the freemarker templates:
+        // To print a single quote one needs to write two single quotes.
+        // Single quotes will be stripped.
+        // Usually single quotes would escape parameters, but this not implemented here.
+        propertyValue = propertyValue.replaceAll("'('?)", "$1");
+        propertyValue = putJavaParamsInNgTranslateFormat(propertyValue);
+
+        return propertyValue;
+    }
+
+    // Put java resource bundle params in ngx-translate format
+    // Do you like {0} and {1} ?
+    //    becomes
+    // Do you like {{param_0}} and {{param_1}} ?
+    private String putJavaParamsInNgTranslateFormat(String propertyValue) {
+
+        Matcher matcher = bundleParamPattern.matcher(propertyValue);
+        while (matcher.find()) {
+            propertyValue = propertyValue.replace(matcher.group(1), "{{param_" + matcher.group(2) + "}}");
+        }
+
+        return propertyValue;
+    }
+
+
 
     @Path("sessions")
     @GET
