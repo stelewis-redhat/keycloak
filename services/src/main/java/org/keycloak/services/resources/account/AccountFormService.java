@@ -17,8 +17,6 @@
 package org.keycloak.services.resources.account;
 
 import org.jboss.logging.Logger;
-import org.jboss.resteasy.spi.HttpRequest;
-import org.jboss.resteasy.spi.HttpResponse;
 import org.keycloak.authorization.AuthorizationProvider;
 import org.keycloak.authorization.model.PermissionTicket;
 import org.keycloak.authorization.model.Policy;
@@ -28,7 +26,6 @@ import org.keycloak.authorization.model.Scope;
 import org.keycloak.authorization.store.PermissionTicketStore;
 import org.keycloak.authorization.store.PolicyStore;
 import org.keycloak.authorization.store.ScopeStore;
-import org.keycloak.common.ClientConnection;
 import org.keycloak.common.Profile;
 import org.keycloak.common.util.Base64Url;
 import org.keycloak.common.util.Time;
@@ -74,7 +71,6 @@ import org.keycloak.services.managers.AuthenticationSessionManager;
 import org.keycloak.services.managers.UserConsentManager;
 import org.keycloak.services.messages.Messages;
 import org.keycloak.services.resources.AbstractSecuredLocalService;
-import org.keycloak.services.resources.Cors;
 import org.keycloak.services.resources.RealmsResource;
 import org.keycloak.services.util.DefaultClientSessionContext;
 import org.keycloak.services.util.ResolveRelative;
@@ -93,15 +89,12 @@ import org.keycloak.utils.CredentialHelper;
 import javax.ws.rs.Consumes;
 import javax.ws.rs.FormParam;
 import javax.ws.rs.GET;
-import javax.ws.rs.HttpMethod;
 import javax.ws.rs.NotFoundException;
 import javax.ws.rs.POST;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
 import javax.ws.rs.QueryParam;
-import javax.ws.rs.core.Context;
-import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.MultivaluedMap;
 import javax.ws.rs.core.Response;
@@ -345,13 +338,8 @@ public class AccountFormService extends AbstractSecuredLocalService {
     @GET
     @Path("localizations/{locale}")
     @Produces(MediaType.APPLICATION_JSON)
-    public Object getLocalizations(@PathParam("locale") String localeStr, @Context UriInfo uriInfo, @Context HttpRequest request, @Context final HttpHeaders headers, @Context HttpResponse response, @Context ClientConnection clientConnection) {
+    public Object getLocalizations(@PathParam("locale") String localeStr) {
         Locale locale = Locale.forLanguageTag(localeStr);
-
-        Cors.add(request)
-                .allowAllOrigins()
-                .allowedMethods(HttpMethod.GET, HttpMethod.PUT, HttpMethod.POST, HttpMethod.DELETE)
-                .exposedHeaders("Location").build(response);
 
         Theme theme;
         try {
